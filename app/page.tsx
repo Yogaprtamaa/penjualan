@@ -13,7 +13,10 @@ import {
   ArrowRight,
   Coffee,
   X,
-  ChevronUp
+  ChevronUp,
+  LogOut,
+  User,
+  Lock
 } from 'lucide-react'
 
 // --- TYPES ---
@@ -42,6 +45,16 @@ interface AdminForm {
   target: string
 }
 
+interface AuthUser {
+  id: string
+  email: string
+  role?: 'owner' | 'cashier'
+  user_metadata?: {
+    name?: string
+    role?: string
+  }
+}
+
 // --- SETUP DATABASE ---
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -62,13 +75,66 @@ export default function ResponsivePOS() {
   const [products, setProducts] = useState<Product[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [cartLoading, setCartLoading] = useState<number | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [loading, setLoading] = useState(true)
   
   // State khusus Mobile
   const [showMobileCart, setShowMobileCart] = useState(false)
 
   useEffect(() => {
-    fetchData()
+    checkUser()
   }, [])
+
+  useEffect(() => {
+    if (user) {
+      fetchData()
+    }
+  }, [user])
+
+  const checkUser = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) {
+      // Get user profile with role
+      const { data: userProfile } = await supabase
+        .from('user_profiles')
+        .select('role')
+        .eq('user_id', session.user.id)
+        .single()
+      
+      if (userProfile) {
+        setUser({
+          id: session.user.id,
+          email: session.user.email!,
+          role: userProfile.role,
+          user_metadata: session.user.user_metadata
+        })
+      }
+    }
+    setLoading(false)
+  }
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    setUser(null)
+    setProducts([])
+    setSales([])
+  }
+
+  const checkPermission = (action: 'view_admin' | 'create_product' | 'delete_product' | 'view_sales' | 'delete_sale') => {
+    if (!user) return false
+    
+    switch (action) {
+      case 'view_admin':
+      case 'create_product':
+      case 'delete_product':
+        return user.role === 'owner'
+      case 'view_sales':
+      case 'delete_sale':
+        return user.role === 'owner' || user.role === 'cashier'
+      default:
+        return false
+    }
+  }
 
   const fetchData = async () => {
     const { data: p } = await supabase.from('products').select('*').order('name', { ascending: true })
@@ -78,6 +144,11 @@ export default function ResponsivePOS() {
   }
 
   const handleJual = async (product: Product, qty: number) => {
+    if (!checkPermission('view_sales')) {
+      alert('Access denied: Insufficient permissions')
+      return
+    }
+    
     setCartLoading(product.id)
     const fee = 0.38
     const gross = product.selling_price * qty
@@ -86,13 +157,22 @@ export default function ResponsivePOS() {
 
     await supabase.from('sales').insert({
       product_name: product.name,
-      qty, gross_total: gross, net_revenue: net, actual_profit: profit
+      qty, 
+      gross_total: gross, 
+      net_revenue: net, 
+      actual_profit: profit
     })
+    
     setCartLoading(null)
     fetchData()
   }
 
   const handleDelete = async (id: number) => {
+    if (!checkPermission('delete_sale')) {
+      alert('Access denied: Only owners can delete sales')
+      return
+    }
+    
     if(confirm('Hapus item ini?')) {
       await supabase.from('sales').delete().eq('id', id)
       fetchData()
@@ -101,12 +181,22 @@ export default function ResponsivePOS() {
 
   // --- LOGIC ADMIN ---
   const handleSimpanMenu = async (form: Omit<Product, 'id'>) => {
+    if (!checkPermission('create_product')) {
+      alert('Access denied: Only owners can create products')
+      return
+    }
+    
     await supabase.from('products').insert(form)
     fetchData()
     alert('Menu Tersimpan!')
   }
 
   const handleHapusMenu = async (id: number) => {
+    if (!checkPermission('delete_product')) {
+      alert('Access denied: Only owners can delete products')
+      return
+    }
+    
     if(confirm('Hapus menu permanen?')) {
       await supabase.from('products').delete().eq('id', id)
       fetchData()
@@ -117,6 +207,25 @@ export default function ResponsivePOS() {
   const totalOmzet = sales.reduce((a, b) => a + b.gross_total, 0)
   const totalItems = sales.reduce((a, b) => a + b.qty, 0)
 
+  // Show loading spinner
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-12 h-12 bg-orange-500 rounded-xl flex items-center justify-center text-white mb-4 mx-auto animate-pulse">
+            <ChefHat size={24} />
+          </div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show login if not authenticated
+  if (!user) {
+    return <LoginScreen onLogin={setUser} />
+  }
+
   return (
     <div className="flex h-screen bg-gray-50 text-gray-800 font-sans overflow-hidden">
       
@@ -125,10 +234,30 @@ export default function ResponsivePOS() {
         <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center text-white mb-8 shadow-lg shadow-orange-200">
           <ChefHat size={20} />
         </div>
-        <nav className="flex flex-col gap-4 w-full px-2">
+        <nav className="flex flex-col gap-4 w-full px-2 flex-1">
           <SidebarBtn active={view === 'pos'} onClick={() => setView('pos')} icon={<LayoutGrid size={22} />} label="KASIR" />
-          <SidebarBtn active={view === 'admin'} onClick={() => setView('admin')} icon={<Settings size={22} />} label="MENU" />
+          {checkPermission('view_admin') && (
+            <SidebarBtn active={view === 'admin'} onClick={() => setView('admin')} icon={<Settings size={22} />} label="MENU" />
+          )}
         </nav>
+        
+        {/* User info and logout */}
+        <div className="w-full px-2 mt-4 border-t border-gray-100 pt-4">
+          <div className="text-center mb-2">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white mx-auto mb-1 ${user.role === 'owner' ? 'bg-orange-500' : 'bg-blue-500'}`}>
+              <User size={14} />
+            </div>
+            <p className="text-[8px] text-gray-500 truncate px-1">{user.email}</p>
+            <p className="text-[7px] font-bold text-gray-400 uppercase">{user.role || 'cashier'}</p>
+          </div>
+          <button 
+            onClick={handleLogout}
+            className="w-full p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex items-center justify-center"
+            title="Logout"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
       </aside>
 
       {/* 2. MAIN CONTENT WRAPPER */}
@@ -144,12 +273,21 @@ export default function ResponsivePOS() {
               // Props tambahan untuk mobile
               isMobile={true}
             />
-          ) : (
+          ) : checkPermission('view_admin') ? (
             <AdminLayout 
               products={products} 
               onSimpan={handleSimpanMenu} 
-              onHapus={handleHapusMenu} 
+              onHapus={handleHapusMenu}
             />
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center text-gray-500">
+                <Lock size={48} className="mx-auto mb-4" />
+                <h2 className="text-xl font-bold mb-2">Access Denied</h2>
+                <p>You don't have permission to access this section.</p>
+                <p className="text-sm mt-2">Current role: <span className="font-bold">{user.role || 'cashier'}</span></p>
+              </div>
+            </div>
           )}
 
           {/* BOTTOM NAVIGATION (HANYA MUNCUL DI MOBILE) */}
@@ -488,6 +626,137 @@ function ProductCard({ data, onJual, loading, icon }: ProductCardProps) {
         >
           {loading ? '...' : <ArrowRight size={14}/>}
         </button>
+      </div>
+    </div>
+  )
+}
+
+// === LOGIN SCREEN COMPONENT ===
+interface LoginScreenProps {
+  onLogin: (user: AuthUser) => void
+}
+
+function LoginScreen({ onLogin }: LoginScreenProps) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+
+    try {
+      // Sign in
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase().trim(),
+        password
+      })
+      
+      if (error) {
+        throw error
+      }
+      
+      if (data.user) {
+        // Get user profile with role
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('role')
+          .eq('user_id', data.user.id)
+          .single()
+        
+        onLogin({
+          id: data.user.id,
+          email: data.user.email!,
+          role: profile?.role || 'cashier',
+          user_metadata: data.user.user_metadata
+        })
+      }
+    } catch (error: any) {
+      alert(error.message || 'Login failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-orange-400 via-orange-500 to-red-500 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center text-orange-500 mx-auto mb-4 shadow-2xl">
+            <ChefHat size={40} />
+          </div>
+          <h1 className="text-3xl font-bold text-white mb-2">My Business POS</h1>
+          <p className="text-orange-100">Sistem Kasir Terpadu</p>
+        </div>
+
+        {/* Login Form */}
+        <div className="bg-white rounded-3xl p-8 shadow-2xl">
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">
+              Masuk ke Sistem
+            </h2>
+            <p className="text-gray-500 text-sm">
+              Gunakan akun yang sudah terdaftar
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+                placeholder="contoh@email.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+                placeholder="Masukkan password"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-orange-500 text-white py-3 rounded-xl font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                'Loading...'
+              ) : (
+                <>
+                  <Lock size={18} />
+                  Masuk
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Admin Info */}
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <div className="bg-gray-50 rounded-xl p-4 text-center">
+              <p className="text-sm text-gray-600 mb-2">
+                <strong>👑 Admin Account:</strong>
+              </p>
+              <p className="text-xs text-gray-500">
+                Email: <code className="bg-white px-2 py-1 rounded">admin@tokoku.com</code>
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Create this account in Supabase Authentication panel
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
