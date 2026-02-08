@@ -206,6 +206,12 @@ export default function ResponsivePOS() {
   // Hitung Total untuk Mobile Bar
   const totalOmzet = sales.reduce((a, b) => a + b.gross_total, 0)
   const totalItems = sales.reduce((a, b) => a + b.qty, 0)
+  
+  // Hitung Detail Revenue Breakdown
+  const totalNetRevenue = sales.reduce((a, b) => a + b.net_revenue, 0)
+  const totalProfit = sales.reduce((a, b) => a + b.actual_profit, 0)
+  const totalFees = totalOmzet - totalNetRevenue
+  const totalCosts = totalNetRevenue - totalProfit
 
   // Show loading spinner
   if (loading) {
@@ -323,7 +329,11 @@ export default function ResponsivePOS() {
           {/* Isi Cart (Reusable Component) */}
           <CartContent 
             sales={sales} 
-            totalOmzet={totalOmzet} 
+            totalOmzet={totalOmzet}
+            totalNetRevenue={totalNetRevenue}
+            totalProfit={totalProfit}
+            totalFees={totalFees}
+            totalCosts={totalCosts}
             onDelete={handleDelete} 
           />
         </div>
@@ -383,20 +393,69 @@ function SidebarBtn({ active, onClick, icon, label }: SidebarBtnProps) {
 interface CartContentProps {
   sales: Sale[]
   totalOmzet: number
+  totalNetRevenue: number
+  totalProfit: number
+  totalFees: number
+  totalCosts: number
   onDelete: (id: number) => Promise<void>
 }
 
-function CartContent({ sales, totalOmzet, onDelete }: CartContentProps) {
+function CartContent({ sales, totalOmzet, totalNetRevenue, totalProfit, totalFees, totalCosts, onDelete }: CartContentProps) {
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Header Cart */}
+      {/* Header Cart dengan Revenue Breakdown */}
       <div className="p-6 border-b border-gray-100 bg-white shrink-0">
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2 mb-3">
            <ShoppingBag size={18} className="text-orange-500"/>
-           <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Ringkasan</span>
+           <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Ringkasan Pendapatan</span>
         </div>
-        <h2 className="text-3xl font-black text-gray-800">Rp {formatRp(totalOmzet)}</h2>
-        <p className="text-xs text-gray-400 mt-1">Total Transaksi Hari Ini</p>
+        
+        {/* Total Gross Revenue */}
+        <div className="mb-4">
+          <h2 className="text-2xl font-black text-gray-800">Rp {formatRp(totalOmzet)}</h2>
+          <p className="text-xs text-gray-400">Total Penjualan Kotor</p>
+        </div>
+        
+        {/* Revenue Breakdown Cards */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          {/* Fee/Potongan */}
+          <div className="bg-red-50 p-3 rounded-lg border border-red-100">
+            <div className="flex items-center gap-1 mb-1">
+              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+              <span className="text-xs font-bold text-red-700">Fee (38%)</span>
+            </div>
+            <p className="text-lg font-black text-red-600">-Rp {formatRp(totalFees)}</p>
+          </div>
+          
+          {/* Net Revenue */}
+          <div className="bg-green-50 p-3 rounded-lg border border-green-100">
+            <div className="flex items-center gap-1 mb-1">
+              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              <span className="text-xs font-bold text-green-700">Pendapatan Bersih</span>
+            </div>
+            <p className="text-lg font-black text-green-600">Rp {formatRp(totalNetRevenue)}</p>
+          </div>
+        </div>
+        
+        {/* Breakdown Detail */}
+        <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-blue-800">Total Modal:</span>
+              <span className="text-sm font-bold text-blue-600">Rp {formatRp(totalCosts)}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-blue-800">Keuntungan Bersih:</span>
+              <span className="text-sm font-bold text-blue-600">Rp {formatRp(totalProfit)}</span>
+            </div>
+            <div className="border-t border-blue-200 pt-2">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-blue-900">Margin:</span>
+                <span className="text-sm font-bold text-blue-900">{totalNetRevenue > 0 ? ((totalProfit / totalNetRevenue) * 100).toFixed(1) : 0}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* List Items Scrollable */}
