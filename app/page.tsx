@@ -364,7 +364,7 @@ export default function ResponsivePOS() {
         </div>
 
         {/* 4. MOBILE FLOATING CART BAR (Hanya muncul di Mobile & Mode POS) */}
-        {view === 'pos' && !showMobileCart && view !== 'report' && (
+        {view === 'pos' && !showMobileCart && (
            <div className="md:hidden absolute bottom-20 left-4 right-4 z-30">
               <button 
                 onClick={() => setShowMobileCart(true)}
